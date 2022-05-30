@@ -1,7 +1,6 @@
-package ui
+package client
 
 import (
-	"github.com/chat-app/app/client"
 	"github.com/jroimartin/gocui"
 )
 
@@ -67,11 +66,11 @@ type KeyBinding struct {
 
 type ClientInterface struct {
 	gui             *gocui.Gui
-	UserClient      *client.Client
+	UserClient      *Client
 	registeredViews map[string]*CustomView
 }
 
-func NewClientInterface(userClient *client.Client) (*ClientInterface, error) {
+func NewClientInterface(userClient *Client) (*ClientInterface, error) {
 	g, err := gocui.NewGui(gocui.OutputNormal)
 	if err != nil {
 		return nil, err
@@ -192,7 +191,7 @@ func (cl *ClientInterface) Close() {
 	cl.gui.Close()
 }
 
-func getKeyBindings(ifc *ClientInterface, client *client.Client) []*KeyBinding {
+func getKeyBindings(ifc *ClientInterface, client *Client) []*KeyBinding {
 	return []*KeyBinding{
 		{
 			boundViewName: "",
@@ -207,6 +206,18 @@ func getKeyBindings(ifc *ClientInterface, client *client.Client) []*KeyBinding {
 			key:           gocui.KeyEnter,
 			modifier:      gocui.ModNone,
 			handler:       loginHandler(ifc, client),
+		},
+		{
+			boundViewName: LoginBoxViewName,
+			key:           gocui.KeyEnter,
+			modifier:      gocui.ModNone,
+			handler:       startReadRunnerHandler(ifc, client),
+		},
+		{
+			boundViewName: MsgBoxViewName,
+			key:           gocui.KeyEnter,
+			modifier:      gocui.ModNone,
+			handler:       chatMsgHandler(client),
 		},
 	}
 }

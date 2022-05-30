@@ -1,12 +1,16 @@
 package client
 
 import (
+	"encoding/json"
 	"fmt"
 	"github.com/chat-app/app/server"
 	"github.com/gorilla/websocket"
 	"github.com/jroimartin/gocui"
 	"io"
+	"io/ioutil"
 	"log"
+	"net/http"
+	"regexp"
 	"strings"
 	"sync"
 )
@@ -15,10 +19,14 @@ var (
 	clientConnOnce sync.Once
 )
 
+const (
+	yellowPrintedText = "\u001B[33;1m%s\u001B[0m\n"
+)
+
 type Client struct {
-	destination string
-	Conn        *websocket.Conn
-	LoggedUsers map[string]bool
+	destination   string
+	usersEndPoint string
+	Conn          *websocket.Conn
 }
 
 func (c *Client) Connect() (err error) {
@@ -35,7 +43,7 @@ func (c *Client) Connect() (err error) {
 	return
 }
 
-func (c *Client) readMessage() ([]byte, error) {
+func (c *Client) ReadMessage() ([]byte, error) {
 	_, p, err := c.Conn.ReadMessage()
 	return p, err
 }
@@ -48,42 +56,84 @@ func (c *Client) Close() error {
 	return c.Conn.Close()
 }
 
-func (c *Client) updateOnlineUsersLoc(username, activity string) {
-	if activity == server.UserJoinedEvent {
-		c.LoggedUsers[username] = true
-		return
+// parseActivityMsg parses message received when user joins or leaves the channel
+func (c *Client) parseActivityMsg(msg string) string {
+	regexStr := fmt.Sprintf(`has\s(%s|%s)\sthe\schannel`, server.UserJoinedEvent, server.UserLeftEvent)
+	regexUserActivity := regexp.MustCompile(regexStr)
+	out := regexUserActivity.FindString(msg)
+	if out != "" {
+		return msg
 	}
-	delete(c.LoggedUsers, username)
+	return out
 }
 
-// TODO: refactor
-func (c *Client) ReadRunner(w io.Writer, g *gocui.Gui) {
+// getUserList pulls the user list from the REST endpoint and unmarshals it into a map
+func (c *Client) getUserList() (*map[string]struct{}, error) {
+	resp, err := http.Get(c.usersEndPoint)
+	if err != nil {
+		return nil, err
+	}
 
+	msg, err := ioutil.ReadAll(resp.Body)
+
+	if err != nil {
+		return nil, err
+	}
+
+	m := &map[string]struct{}{}
+
+	err = json.Unmarshal(msg, m)
+	if err != nil {
+		return nil, err
+	}
+
+	return m, nil
+}
+
+func (c *Client) ReadRunner(w io.Writer, ifc *ClientInterface) {
 	for {
-		b, err := c.readMessage()
+		b, err := c.ReadMessage()
 		if err != nil {
-			log.Println("read runner encountered error: ", err)
+			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
+				log.Printf("error: %v", err)
+			}
+			return
 		}
 
 		msg := string(b)
-		// if activity msg indicating leaving or join, parse it, break it and update map
-		// nice if we can just erase where the location is
-		testview, _ := g.View("userbar")
 
-		if strings.HasPrefix(msg, "//") {
-			msgArr := strings.Split(msg, " ")
-			c.updateOnlineUsersLoc(msgArr[1], msgArr[3])
-			testview.Clear()
-			for k, _ := range c.LoggedUsers {
-				fmt.Fprintln(testview, k)
-			}
-		}
+		ifc.gui.Update(func(gui *gocui.Gui) error {
 
-		g.Update(func(gui *gocui.Gui) error {
-			_, err = fmt.Fprintf(w, fmt.Sprintf("%s\n", msg))
-			if err != nil {
-				log.Println("read runner encountered error: ", err)
-				return err
+			// special command that is only triggered by the server
+			if strings.HasPrefix(msg, "//") {
+
+				parsedMsg := c.parseActivityMsg(msg)
+
+				// we are dealing with a user joining or leaving the chat
+				if parsedMsg != "" {
+					_, err = fmt.Fprintf(w, fmt.Sprintf(yellowPrintedText, msg))
+					if err != nil {
+						return err
+					}
+
+					m, err := c.getUserList()
+
+					if err != nil {
+						return err
+					}
+					userBarView := ifc.registeredViews[UserBarViewName].view
+					for k, _ := range *m {
+						fmt.Fprintln(userBarView, k)
+					}
+				}
+				// regular broadcasted chat messages
+			} else {
+				_, err = fmt.Fprintf(w, fmt.Sprintf("%s", msg))
+				if err != nil {
+					log.Println("read runner encountered error: ", err)
+					return err
+				}
+				return nil
 			}
 			return nil
 		})
@@ -92,8 +142,8 @@ func (c *Client) ReadRunner(w io.Writer, g *gocui.Gui) {
 
 func InitClient() (*Client, error) {
 	client := &Client{
-		destination: "ws://localhost:8080/ws",
-		LoggedUsers: make(map[string]bool),
+		destination:   "ws://localhost:8080/ws",
+		usersEndPoint: "http://localhost:8080/users",
 	}
 
 	err := client.Connect()

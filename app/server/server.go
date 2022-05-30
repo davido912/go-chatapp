@@ -2,7 +2,7 @@ package server
 
 import (
 	"context"
-	"fmt"
+	"encoding/json"
 	"github.com/gorilla/websocket"
 	"log"
 	"net/http"
@@ -23,35 +23,7 @@ type Server struct {
 
 func (s *Server) registerHandlers() {
 	s.mux.HandleFunc("/ws", s.wsHandler)
-	s.mux.HandleFunc("/", s.home)
-}
-
-// TODO: fix so that the msg isn't being sent to the user who sent it - rework,
-func (s *Server) broadcastRunner(ctx context.Context, c chan Message) {
-	for {
-		select {
-
-		case msg := <-c:
-			func(msg Message) {
-				s.mu.Lock()
-				defer s.mu.Unlock()
-				for k, v := range s.hub.loggedUsers {
-					if k != msg.Username {
-						sender := fmt.Sprintf("[%s] ", msg.Username)
-						msgBody := append([]byte(sender), msg.Body...)
-						err := v.WriteMessage(websocket.TextMessage, msgBody)
-						if err != nil {
-							log.Println("err ", err)
-						}
-					}
-				}
-			}(msg)
-
-		case <-ctx.Done():
-			log.Println("closing broadcast runner")
-			return
-		}
-	}
+	s.mux.HandleFunc("/users", s.usersHandler)
 }
 
 func (s *Server) wsHandler(w http.ResponseWriter, req *http.Request) {
@@ -92,6 +64,7 @@ func (s *Server) wsHandler(w http.ResponseWriter, req *http.Request) {
 			}
 
 			if len(p) > 0 {
+
 				if strings.HasPrefix(string(p), "//") { // TODO: move all of these functions to validation
 
 				} else {
@@ -104,16 +77,21 @@ func (s *Server) wsHandler(w http.ResponseWriter, req *http.Request) {
 	}(conn)
 }
 
-func (s *Server) home(w http.ResponseWriter, req *http.Request) {
-
-	var out string
-
-	for k, _ := range s.hub.loggedUsers {
-		out += fmt.Sprintf("%q \n", k)
+func (s *Server) usersHandler(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
 	}
-	_, err := w.Write([]byte(out))
+
+	w.Header().Set("Content-Type", "application/json")
+	bs, err := json.Marshal(s.loggedUsers)
 	if err != nil {
-		log.Fatal(err)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	_, err = w.Write(bs)
+	if err != nil {
+		log.Println(err)
 		return
 	}
 }
@@ -128,7 +106,6 @@ func NewServer(ctx context.Context) error {
 	}
 
 	go h.Run(ctx)
-	go serv.broadcastRunner(ctx, h.broadcastChan)
 
 	serv.registerHandlers()
 
