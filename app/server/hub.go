@@ -92,9 +92,11 @@ func (h *hub) updateOnlineUsers(user *User, userEvent string) error {
 }
 
 // broadcasts a message to all currently connected users TODO: include error for when a user logs out while lock is still obtained (check error that websocket is closed)
+// 2022/05/31 16:43:23 write tcp 127.0.0.1:8080->127.0.0.1:60675: use of closed network connection
 func (h *hub) broadcast(msg Message) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	
 	for _, v := range h.loggedUsers {
 		sender := fmt.Sprintf("[%s] ", msg.Username)
 		msgBody := append([]byte(sender), msg.Body...)

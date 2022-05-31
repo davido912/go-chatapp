@@ -86,6 +86,7 @@ func NewClientInterface(userClient *Client) (*ClientInterface, error) {
 	if err != nil {
 		return nil, err
 	}
+	g.Cursor = true
 
 	ifc := &ClientInterface{
 		registeredViews: make(map[string]*CustomView),
@@ -272,6 +273,30 @@ func getKeyBindings(ifc *ClientInterface, client *Client) []*KeyBinding {
 			key:           gocui.KeyEnter,
 			modifier:      gocui.ModNone,
 			handler:       nextView(ifc, LoginBoxViewName, LoginBoxViewName),
+		},
+		{
+			boundViewName: MsgBoxViewName,
+			key:           gocui.KeyArrowUp,
+			modifier:      gocui.ModNone,
+			handler:       scrollView(ifc, LoginBoxViewName, -1),
+		},
+		{
+			boundViewName: MsgBoxViewName,
+			key:           gocui.KeyArrowDown,
+			modifier:      gocui.ModNone,
+			handler:       scrollView(ifc, LoginBoxViewName, 1),
+		},
+		{
+			boundViewName: UserBarViewName,
+			key:           gocui.KeyArrowUp,
+			modifier:      gocui.ModNone,
+			handler:       scrollView(ifc, LoginBoxViewName, -1),
+		},
+		{
+			boundViewName: UserBarViewName,
+			key:           gocui.KeyArrowDown,
+			modifier:      gocui.ModNone,
+			handler:       scrollView(ifc, LoginBoxViewName, 1),
 		},
 	}
 }

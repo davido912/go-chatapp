@@ -147,3 +147,21 @@ func nextView(ifc *ClientInterface, setViewName string, viewNames ...string) gui
 		return nil
 	}
 }
+
+func scrollView(ifc *ClientInterface, setViewName string, dy int) guiHandler {
+	return func(g *gocui.Gui, v *gocui.View) error {
+		ifc.SetCurrentView(UserBarViewName)
+		vi := ifc.registeredViews[UserBarViewName].view
+
+		if vi != nil {
+			vi.Autoscroll = false
+			ox, oy := vi.Origin()
+			if err := vi.SetOrigin(ox, oy+dy); err != nil {
+				return nil
+			}
+		}
+
+		return nil
+
+	}
+}

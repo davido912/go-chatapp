@@ -1,0 +1,20 @@
+implement a spam filter
+fix so that whoever sent the msg wont see it
+think about adding so that the user who sends the msg sees their own name
+
+add pings and pongs (between server and clients)
+add deadlines on connections
+rework ctxs
+
+REST API for access to users
+
+make sure it works on windows
+
+
+no special characters or white spaces!
+
+
+
+
+
+
