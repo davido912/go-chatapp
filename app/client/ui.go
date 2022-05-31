@@ -1,28 +1,35 @@
 package client
 
 import (
+	"fmt"
 	"github.com/jroimartin/gocui"
 )
 
 const (
-	LoginViewName      = "login"
-	LoginBoxViewName   = "loginbox"
-	ChatWindowViewName = "chatwindow"
-	UserBarViewName    = "userbar"
-	MsgBoxViewName     = "msgbox"
+	ErrorWindowViewName = "error"
+	LoginViewName       = "login"
+	LoginBoxViewName    = "loginbox"
+	ChatWindowViewName  = "chatwindow"
+	UserBarViewName     = "userbar"
+	MsgBoxViewName      = "msgbox"
+)
+
+var (
+	colorRed = gocui.ColorRed
 )
 
 // CustomView serves as a skeleton to all view structs
 type CustomView struct {
-	view     *gocui.View
-	name     string       // logical object representation of the view
-	title    string       // graphical title on the view
-	editable bool         // whether a view can be fed input
-	wrapText bool         // wraps text when it is longer than width of box
-	frame    bool         // enable boarders around the view (graphic)
-	x, y     int          // represents top screen axis
-	x1, y1   int          // represents bottom screen axis
-	initFunc func() error // func executed when view is initialised
+	view            *gocui.View
+	name            string // logical object representation of the view
+	title           string // graphical title on the view
+	editable        bool   // whether a view can be fed input
+	wrapText        bool   // wraps text when it is longer than width of box
+	frame           bool   // enable boarders around the view (graphic)
+	x, y            int    // represents top screen axis
+	x1, y1          int    // represents bottom screen axis
+	backgroundColor *gocui.Attribute
+	initFunc        func() error // func executed when view is initialised
 }
 
 func (cv *CustomView) Initialise(cl *ClientInterface) (err error) {
@@ -49,6 +56,10 @@ func (cv *CustomView) Initialise(cl *ClientInterface) (err error) {
 			if err != nil {
 				return err
 			}
+		}
+
+		if cv.backgroundColor != nil {
+			cv.view.BgColor = *cv.backgroundColor
 		}
 
 		cl.registeredViews[cv.name] = cv
@@ -106,6 +117,16 @@ func (cl *ClientInterface) setLayout(_ *gocui.Gui) error {
 	maxX, maxY := cl.gui.Size()
 
 	views := []*CustomView{
+		{
+			name:            ErrorWindowViewName,
+			x:               maxX/2 - 40,
+			y:               maxY/2 - 5,
+			x1:              maxX/2 + 40,
+			y1:              maxY/2 + 5,
+			title:           "Error!!! [press Enter to continue]",
+			wrapText:        true,
+			backgroundColor: &colorRed,
+		},
 		{
 			name:     ChatWindowViewName,
 			x:        30,
@@ -167,6 +188,28 @@ func (cl *ClientInterface) setLayout(_ *gocui.Gui) error {
 }
 
 // SetKeyBindings assigns keybindings to the GUI
+func (cl *ClientInterface) DisplayError(errorMsg string) error {
+	errorView := cl.registeredViews[ErrorWindowViewName].view
+	errorView.Clear()
+	if err := errorView.SetCursor(0, 0); err != nil {
+		return err
+	}
+
+	_, err := fmt.Fprintf(errorView, errorMsg)
+	if err != nil {
+		return err
+	}
+
+	err = cl.SetViewOnTop(errorView.Name())
+	if err != nil {
+		return err
+	}
+	err = cl.SetCurrentView(errorView.Name())
+
+	return err
+}
+
+// SetKeyBindings assigns keybindings to the GUI
 func (cl *ClientInterface) SetKeyBindings(kbs []*KeyBinding) error {
 	for _, kb := range kbs {
 		err := cl.gui.SetKeybinding(kb.boundViewName, kb.key, kb.modifier, kb.handler)
@@ -179,6 +222,11 @@ func (cl *ClientInterface) SetKeyBindings(kbs []*KeyBinding) error {
 
 func (cl *ClientInterface) SetViewOnTop(viewname string) error {
 	_, err := cl.gui.SetViewOnTop(viewname)
+	return err
+}
+
+func (cl *ClientInterface) SetViewOnBottom(viewname string) error {
+	_, err := cl.gui.SetViewOnBottom(viewname)
 	return err
 }
 
@@ -218,6 +266,12 @@ func getKeyBindings(ifc *ClientInterface, client *Client) []*KeyBinding {
 			key:           gocui.KeyEnter,
 			modifier:      gocui.ModNone,
 			handler:       chatMsgHandler(client),
+		},
+		{
+			boundViewName: ErrorWindowViewName,
+			key:           gocui.KeyEnter,
+			modifier:      gocui.ModNone,
+			handler:       nextView(ifc, LoginBoxViewName, LoginBoxViewName),
 		},
 	}
 }

@@ -29,14 +29,25 @@ type Client struct {
 	Conn          *websocket.Conn
 }
 
-func (c *Client) Connect() (err error) {
-	clientConnOnce.Do(func() {
+func (c *Client) Connect(force bool) (err error) {
+	_connect := func() error {
 		dialer := websocket.Dialer{}
 		c.Conn, _, err = dialer.Dial(c.destination, nil)
 		if err != nil {
-			return
+			return err
 		}
+		return nil
+	}
+
+	// to bypass sync.Once (for example when username is taken and login is retried)
+	if force {
+		return _connect()
+	}
+
+	clientConnOnce.Do(func() {
+		err = _connect()
 	})
+
 	if err != nil {
 		return err
 	}
@@ -122,6 +133,9 @@ func (c *Client) ReadRunner(w io.Writer, ifc *ClientInterface) {
 						return err
 					}
 					userBarView := ifc.registeredViews[UserBarViewName].view
+					userBarView.Clear()
+					userBarView.SetCursor(0, 0)
+
 					for k, _ := range *m {
 						fmt.Fprintln(userBarView, k)
 					}
@@ -144,11 +158,6 @@ func InitClient() (*Client, error) {
 	client := &Client{
 		destination:   "ws://localhost:8080/ws",
 		usersEndPoint: "http://localhost:8080/users",
-	}
-
-	err := client.Connect()
-	if err != nil {
-		return nil, err
 	}
 
 	return client, nil

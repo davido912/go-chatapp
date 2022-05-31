@@ -11,6 +11,8 @@ import (
 const (
 	UserJoinedEvent = "joined"
 	UserLeftEvent   = "left"
+
+	UsernameTakenErrorText = "username %q is already taken"
 )
 
 type Message struct {
@@ -26,18 +28,40 @@ type User struct {
 }
 
 type hub struct {
-	loggedUsers    map[Username]*websocket.Conn // for now all users are registered in the map right away
-	mu             sync.Mutex
-	registerChan   chan *User
-	deregisterChan chan *User
-	broadcastChan  chan Message
+	loggedUsers           map[Username]*websocket.Conn
+	mu                    sync.Mutex
+	registerChan          chan *User
+	registrationErrorChan chan error
+	deregisterChan        chan *User
+	broadcastChan         chan Message
 }
 
-func (h *hub) register(user *User) {
+func (h *hub) register(user *User) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+
 	log.Println("registering user: ", user.Username)
+	if _, ok := h.loggedUsers[user.Username]; ok {
+		err := user.Conn.WriteMessage(websocket.TextMessage, []byte("1")) // user already exists
+		if err != nil {
+			log.Println("hit error when registering user: ", err)
+			return err
+		}
+		usernameTakenErr := fmt.Errorf(UsernameTakenErrorText, user.Username)
+		h.registrationErrorChan <- usernameTakenErr
+
+		return usernameTakenErr
+	}
+
+	err := user.Conn.WriteMessage(websocket.TextMessage, []byte("0"))
+	if err != nil {
+		log.Println("hit error when registering user: ", err)
+		return err
+	}
 	h.loggedUsers[user.Username] = user.Conn
+	h.registrationErrorChan <- nil
+
+	return nil
 }
 
 func (h *hub) deregister(user *User) {
@@ -46,26 +70,10 @@ func (h *hub) deregister(user *User) {
 	if _, ok := h.loggedUsers[user.Username]; ok {
 		log.Println("deregistering user: ", user.Username)
 		delete(h.loggedUsers, user.Username)
+	} else {
+		log.Printf("user %q is not found", user.Username)
 	}
 }
-
-//func (h *hub) sendUserList(conn *websocket.Conn) error {
-//
-//	userlist := "//userlist: "
-//	usernames := make([]string, len(h.loggedUsers))
-//
-//	var i int
-//	for k, _ := range h.loggedUsers {
-//		usernames[i] = string(k)
-//		i++
-//	}
-//	userlist += strings.Join(usernames, ";")
-//	err := conn.WriteMessage(websocket.TextMessage, []byte(userlist))
-//	if err != nil {
-//		return err
-//	}
-//	return nil
-//}
 
 // send a message to all users in regards to a user joining / leaving TODO: rework to use database
 func (h *hub) updateOnlineUsers(user *User, userEvent string) error {
@@ -83,7 +91,7 @@ func (h *hub) updateOnlineUsers(user *User, userEvent string) error {
 	return nil
 }
 
-// broadcasts a message to all currently connected users TODO: include error for when a user logs out while lock is still obtained
+// broadcasts a message to all currently connected users TODO: include error for when a user logs out while lock is still obtained (check error that websocket is closed)
 func (h *hub) broadcast(msg Message) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -92,14 +100,15 @@ func (h *hub) broadcast(msg Message) {
 		msgBody := append([]byte(sender), msg.Body...)
 		err := v.WriteMessage(websocket.TextMessage, msgBody)
 		if err != nil {
-			log.Println("err ", err)
+			log.Println(err)
 		}
 	}
 }
 
 func (h *hub) Run(ctx context.Context) {
+	// goroutine to broadcast msgs in channel
 	go func() {
-		for { // TODO: consider whether a select is required here, maybe later when more functionality is added
+		for {
 			select {
 			case msg := <-h.broadcastChan:
 				h.broadcast(msg)
@@ -110,10 +119,15 @@ func (h *hub) Run(ctx context.Context) {
 	for {
 		select {
 		case user := <-h.registerChan:
-			h.register(user)
-			err := h.updateOnlineUsers(user, UserJoinedEvent)
+			err := h.register(user)
 			if err != nil {
-				log.Printf("encountered error when updating users: %s", err)
+				log.Println(err)
+			} else {
+
+				err = h.updateOnlineUsers(user, UserJoinedEvent)
+				if err != nil {
+					log.Printf("encountered error when updating users: %s", err)
+				}
 			}
 
 		case user := <-h.deregisterChan:
@@ -133,10 +147,11 @@ func (h *hub) Run(ctx context.Context) {
 
 func NewHub() *hub {
 	return &hub{
-		loggedUsers:    make(map[Username]*websocket.Conn),
-		mu:             sync.Mutex{},
-		registerChan:   make(chan *User),
-		deregisterChan: make(chan *User),
-		broadcastChan:  make(chan Message),
+		loggedUsers:           make(map[Username]*websocket.Conn),
+		mu:                    sync.Mutex{},
+		registerChan:          make(chan *User),
+		registrationErrorChan: make(chan error),
+		deregisterChan:        make(chan *User),
+		broadcastChan:         make(chan Message),
 	}
 }

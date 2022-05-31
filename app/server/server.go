@@ -53,6 +53,10 @@ func (s *Server) wsHandler(w http.ResponseWriter, req *http.Request) {
 		user = &User{Username: Username(p), Conn: conn}
 		s.hub.registerChan <- user
 
+		if err := <-s.hub.registrationErrorChan; err != nil {
+			return
+		}
+
 		defer func() {
 			s.hub.deregisterChan <- user
 		}()
