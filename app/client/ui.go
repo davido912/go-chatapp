@@ -2,10 +2,12 @@ package client
 
 import (
 	"fmt"
+
 	"github.com/jroimartin/gocui"
 )
 
 const (
+	ExitWindowViewName  = "exit"
 	ErrorWindowViewName = "error"
 	LoginViewName       = "login"
 	LoginBoxViewName    = "loginbox"
@@ -15,7 +17,8 @@ const (
 )
 
 var (
-	colorRed = gocui.ColorRed
+	colorRed  = gocui.ColorRed
+	colorBlue = gocui.ColorBlue
 )
 
 // CustomView serves as a skeleton to all view structs
@@ -24,12 +27,14 @@ type CustomView struct {
 	name            string // logical object representation of the view
 	title           string // graphical title on the view
 	editable        bool   // whether a view can be fed input
-	wrapText        bool   // wraps text when it is longer than width of box
-	frame           bool   // enable boarders around the view (graphic)
-	x, y            int    // represents top screen axis
-	x1, y1          int    // represents bottom screen axis
+	editorFunc      gocui.EditorFunc
+	wrapText        bool // wraps text when it is longer than width of box
+	frame           bool // enable boarders around the view (graphic)
+	x, y            int  // represents top screen axis
+	x1, y1          int  // represents bottom screen axis
 	backgroundColor *gocui.Attribute
 	initFunc        func() error // func executed when view is initialised
+	prevCurrentView *CustomView
 }
 
 func (cv *CustomView) Initialise(cl *ClientInterface) (err error) {
@@ -45,6 +50,10 @@ func (cv *CustomView) Initialise(cl *ClientInterface) (err error) {
 
 		if cv.editable {
 			cv.view.Editable = cv.editable
+
+			if cv.editorFunc != nil {
+				cv.view.Editor = gocui.EditorFunc(cv.editorFunc)
+			}
 		}
 
 		if cv.wrapText {
@@ -87,6 +96,7 @@ func NewClientInterface(userClient *Client) (*ClientInterface, error) {
 		return nil, err
 	}
 	g.Cursor = true
+	g.InputEsc = true
 
 	ifc := &ClientInterface{
 		registeredViews: make(map[string]*CustomView),
@@ -118,6 +128,18 @@ func (cl *ClientInterface) setLayout(_ *gocui.Gui) error {
 	maxX, maxY := cl.gui.Size()
 
 	views := []*CustomView{
+		{
+			name:            ExitWindowViewName,
+			x:               maxX/2 - 40,
+			y:               maxY/2 - 5,
+			x1:              maxX/2 + 40,
+			y1:              maxY/2 + 5,
+			title:           "Are you sure you want to exit? [y/n]",
+			wrapText:        true,
+			editable:        true,
+			editorFunc:      exitEditorFunc,
+			backgroundColor: &colorBlue,
+		},
 		{
 			name:            ErrorWindowViewName,
 			x:               maxX/2 - 40,
@@ -240,6 +262,18 @@ func (cl *ClientInterface) Close() {
 	cl.gui.Close()
 }
 
+func exitEditorFunc(v *gocui.View, key gocui.Key, ch rune, mod gocui.Modifier) {
+	switch {
+	case ch != 0 && mod == 0 && string(ch) == "y" || string(ch) == "n":
+		v.EditDelete(true)
+		v.EditWrite(ch)
+	case key == gocui.KeyBackspace || key == gocui.KeyBackspace2:
+		v.EditDelete(true)
+	case key == gocui.KeyDelete:
+		v.EditDelete(false)
+	}
+}
+
 func getKeyBindings(ifc *ClientInterface, client *Client) []*KeyBinding {
 	return []*KeyBinding{
 		{
@@ -249,6 +283,18 @@ func getKeyBindings(ifc *ClientInterface, client *Client) []*KeyBinding {
 			handler: func(_ *gocui.Gui, _ *gocui.View) error {
 				return gocui.ErrQuit
 			},
+		},
+		{
+			boundViewName: "",
+			key:           gocui.KeyEsc,
+			modifier:      gocui.ModNone,
+			handler:       exitViewHandler(ifc, client),
+		},
+		{
+			boundViewName: ExitWindowViewName,
+			key:           gocui.KeyEnter,
+			modifier:      gocui.ModNone,
+			handler:       exitHandler(ifc, client),
 		},
 		{
 			boundViewName: LoginBoxViewName,
@@ -274,6 +320,8 @@ func getKeyBindings(ifc *ClientInterface, client *Client) []*KeyBinding {
 			modifier:      gocui.ModNone,
 			handler:       nextView(ifc, LoginBoxViewName, LoginBoxViewName),
 		},
+
+		// scrolling of the user bar (applies on all following views)
 		{
 			boundViewName: MsgBoxViewName,
 			key:           gocui.KeyArrowUp,
