@@ -3,17 +3,22 @@ package server
 import (
 	"context"
 	"fmt"
-	"github.com/gorilla/websocket"
 	"log"
 	"sync"
+
+	"github.com/gorilla/websocket"
 )
 
 const (
 	UserJoinedEvent = "joined"
 	UserLeftEvent   = "left"
-
-	UsernameTakenErrorText = "username %q is already taken"
 )
+
+type UserNameTakenError struct{ username string }
+
+func (e UserNameTakenError) Error() string {
+	return fmt.Sprintf("username %q is taken", e.username)
+}
 
 type Message struct {
 	Username
@@ -39,29 +44,19 @@ type hub struct {
 func (h *hub) register(user *User) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	var err error
 
 	log.Println("registering user: ", user.Username)
 	if _, ok := h.loggedUsers[user.Username]; ok {
-		err := user.Conn.WriteMessage(websocket.TextMessage, []byte("1")) // user already exists
-		if err != nil {
-			log.Println("hit error when registering user: ", err)
-			return err
-		}
-		usernameTakenErr := fmt.Errorf(UsernameTakenErrorText, user.Username)
-		h.registrationErrorChan <- usernameTakenErr
-
-		return usernameTakenErr
-	}
-
-	err := user.Conn.WriteMessage(websocket.TextMessage, []byte("0"))
-	if err != nil {
-		log.Println("hit error when registering user: ", err)
+		err = UserNameTakenError{string(user.Username)}
+		h.registrationErrorChan <- err
 		return err
 	}
-	h.loggedUsers[user.Username] = user.Conn
-	h.registrationErrorChan <- nil
 
-	return nil
+	h.loggedUsers[user.Username] = user.Conn
+	h.registrationErrorChan <- err
+
+	return err
 }
 
 func (h *hub) deregister(user *User) {
@@ -71,7 +66,7 @@ func (h *hub) deregister(user *User) {
 		log.Println("deregistering user: ", user.Username)
 		delete(h.loggedUsers, user.Username)
 	} else {
-		log.Printf("user %q is not found", user.Username)
+		log.Printf("user %q not found", user.Username)
 	}
 }
 
@@ -96,7 +91,7 @@ func (h *hub) updateOnlineUsers(user *User, userEvent string) error {
 func (h *hub) broadcast(msg Message) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	
+
 	for _, v := range h.loggedUsers {
 		sender := fmt.Sprintf("[%s] ", msg.Username)
 		msgBody := append([]byte(sender), msg.Body...)
