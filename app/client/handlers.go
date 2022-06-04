@@ -1,13 +1,14 @@
 package client
 
 import (
-	"bufio"
 	"bytes"
 	"fmt"
-	"github.com/jroimartin/gocui"
 	"io"
+	"net/http"
 	"strings"
 	"time"
+
+	"github.com/jroimartin/gocui"
 )
 
 type guiHandler func(g *gocui.Gui, v *gocui.View) error
@@ -20,11 +21,6 @@ var (
 // afterwards it hides the login views and moves to the normal chat views
 func loginHandler(ifc *ClientInterface, client *Client) guiHandler {
 	return func(g *gocui.Gui, v *gocui.View) error {
-		err := client.Connect(true)
-		if err != nil {
-			return err
-		}
-
 		v.Rewind() // ensure reading from beginning of view's buffer
 
 		bs := make([]byte, 1024)
@@ -33,28 +29,30 @@ func loginHandler(ifc *ClientInterface, client *Client) guiHandler {
 			return err
 		}
 
-		buf := bytes.NewBuffer(bs)
-		scanner := bufio.NewScanner(buf)
-		scanner.Scan()
+		nickname := strings.TrimSuffix(string(bs[:n]), "\n") // removing newline
+		buf := bytes.NewBuffer([]byte(nickname))
 
-		err = client.WriteMessage(scanner.Text())
+		// TODO: rework constant url here
+		resp, err := http.Post("http://localhost:8080/login", "text/plain", buf)
 		if err != nil {
 			return err
 		}
 
-		resp, err := client.ReadMessage()
-		if err != nil {
-			return err
-		}
-
-		if string(resp) != "0" {
-			nickname := strings.TrimSuffix(string(bs[:n]), "\n") // removing newline
+		if resp.StatusCode != http.StatusOK {
 			msg := fmt.Sprintf("username %q is already taken", nickname)
 			err := ifc.DisplayError(msg)
 			if err != nil {
 				return err
 			}
 			return nil // make sure it's terminated also with the children
+		}
+
+		err = client.Connect(true)
+		if err != nil {
+			return err
+		}
+		if err := client.WriteMessage(nickname); err != nil {
+			return err
 		}
 
 		connectionReady <- struct{}{}

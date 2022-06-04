@@ -3,10 +3,12 @@ package server
 import (
 	"context"
 	"encoding/json"
-	"github.com/gorilla/websocket"
+	"io/ioutil"
 	"log"
 	"net/http"
 	"strings"
+
+	"github.com/gorilla/websocket"
 )
 
 var (
@@ -23,6 +25,7 @@ type Server struct {
 
 func (s *Server) registerHandlers() {
 	s.mux.HandleFunc("/ws", s.wsHandler)
+	s.mux.HandleFunc("/login", s.loginHandler)
 	s.mux.HandleFunc("/users", s.usersHandler)
 }
 
@@ -31,8 +34,6 @@ func (s *Server) wsHandler(w http.ResponseWriter, req *http.Request) {
 	if err != nil {
 		return
 	}
-
-	var user *User
 
 	go func(conn *websocket.Conn) {
 		defer func() {
@@ -43,6 +44,8 @@ func (s *Server) wsHandler(w http.ResponseWriter, req *http.Request) {
 			_ = conn.Close()
 		}()
 
+		var user *User
+
 		// reading first message which is the username TODO: validation of validates
 		_, p, err := conn.ReadMessage()
 
@@ -51,11 +54,8 @@ func (s *Server) wsHandler(w http.ResponseWriter, req *http.Request) {
 		}
 
 		user = &User{Username: Username(p), Conn: conn}
-		s.hub.registerChan <- user
 
-		if err := <-s.hub.registrationErrorChan; err != nil {
-			return
-		}
+		s.hub.registerChan <- user
 
 		defer func() {
 			s.hub.deregisterChan <- user
@@ -68,7 +68,6 @@ func (s *Server) wsHandler(w http.ResponseWriter, req *http.Request) {
 			}
 
 			if len(p) > 0 {
-
 				if strings.HasPrefix(string(p), "//") { // TODO: move all of these functions to validation
 
 				} else {
@@ -77,7 +76,6 @@ func (s *Server) wsHandler(w http.ResponseWriter, req *http.Request) {
 			}
 
 		}
-
 	}(conn)
 }
 
@@ -98,6 +96,26 @@ func (s *Server) usersHandler(w http.ResponseWriter, req *http.Request) {
 		log.Println(err)
 		return
 	}
+}
+
+func (s *Server) loginHandler(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	bs, _ := ioutil.ReadAll(req.Body)
+	defer req.Body.Close()
+
+	username := Username(bs)
+
+	// username already exists in the chat
+	if _, ok := s.loggedUsers[username]; ok {
+		w.WriteHeader(http.StatusConflict)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+
 }
 
 func NewServer(ctx context.Context) error {
