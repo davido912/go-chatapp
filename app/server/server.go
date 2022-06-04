@@ -3,9 +3,11 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io/ioutil"
 	"log"
 	"net/http"
+	"regexp"
 	"strings"
 
 	"github.com/gorilla/websocket"
@@ -103,13 +105,20 @@ func (s *Server) loginHandler(w http.ResponseWriter, req *http.Request) {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
+	rgx := regexp.MustCompile("^[a-zA-Z0-9_.-]*$")
 	bs, _ := ioutil.ReadAll(req.Body)
 	defer req.Body.Close()
 
+	// username contains invalid characters
+	if rgx.Find(bs) == nil {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
 	username := Username(bs)
 
 	// username already exists in the chat
 	if _, ok := s.loggedUsers[username]; ok {
+		fmt.Println(s.loggedUsers)
 		w.WriteHeader(http.StatusConflict)
 		return
 	}

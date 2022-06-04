@@ -40,13 +40,21 @@ func loginHandler(ifc *ClientInterface, client *Client) guiHandler {
 			return err
 		}
 
-		if resp.StatusCode != http.StatusOK {
+		switch resp.StatusCode {
+		case http.StatusConflict:
 			msg := fmt.Sprintf("username %q is already taken", nickname)
 			err := ifc.DisplayError(msg)
 			if err != nil {
 				return err
 			}
-			return nil // make sure it's terminated also with the children
+			return nil
+		case http.StatusBadRequest:
+			msg := fmt.Sprintf("nickname %q can contain only alphanumeric spaces (no spaces, no special characters)", nickname)
+			err := ifc.DisplayError(msg)
+			if err != nil {
+				return err
+			}
+			return nil
 		}
 
 		err = client.Connect(true)
@@ -192,7 +200,7 @@ func exitHandler(ifc *ClientInterface, client *Client) guiHandler {
 	return func(g *gocui.Gui, v *gocui.View) error {
 
 		exitView := ifc.registeredViews[ExitWindowViewName]
-		
+
 		bs := make([]byte, 1024)
 		exitView.view.Rewind()
 		n, err := exitView.view.Read(bs)
